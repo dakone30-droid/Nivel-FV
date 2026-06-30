@@ -1,4 +1,4 @@
-name: Build NivelFV APK
+name: Build NivelFV APK v2
 
 on:
   workflow_dispatch:
@@ -31,7 +31,11 @@ jobs:
 
       - name: Create Android project
         run: |
+          rm -rf app build.gradle settings.gradle
           mkdir -p app/src/main/java/com/dakone/nivelfv
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-hdpi
+
           cat > settings.gradle <<'GRADLE'
           pluginManagement {
               repositories {
@@ -70,14 +74,28 @@ jobs:
                   applicationId 'com.dakone.nivelfv'
                   minSdk 23
                   targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
+                  versionCode 2
+                  versionName '0.2-neon'
               }
           }
           GRADLE
 
+          cat > app/src/main/res/values/styles.xml <<'XML'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:navigationBarColor">#080C18</item>
+                  <item name="android:statusBarColor">#080C18</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+              </style>
+          </resources>
+          XML
+
           cat > app/src/main/AndroidManifest.xml <<'XML'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.VIBRATE" />
+
               <application
                   android:theme="@style/AppTheme"
                   android:label="Nivel FV"
@@ -96,21 +114,17 @@ jobs:
           </manifest>
           XML
 
-          mkdir -p app/src/main/res/values
-          cat > app/src/main/res/values/styles.xml <<'XML'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:windowLightStatusBar">true</item>
-                  <item name="android:colorAccent">#111111</item>
-              </style>
-          </resources>
-          XML
-
           cat > app/src/main/java/com/dakone/nivelfv/MainActivity.java <<'JAVA'
           package com.dakone.nivelfv;
 
           import android.app.Activity;
+          import android.content.Context;
+          import android.graphics.Canvas;
+          import android.graphics.Color;
+          import android.graphics.Paint;
+          import android.graphics.RectF;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
           import android.hardware.Sensor;
           import android.hardware.SensorEvent;
           import android.hardware.SensorEventListener;
@@ -119,10 +133,11 @@ jobs:
           import android.os.Environment;
           import android.os.VibrationEffect;
           import android.os.Vibrator;
-          import android.content.Context;
-          import android.graphics.Color;
+          import android.text.InputType;
           import android.view.Gravity;
           import android.view.View;
+          import android.view.Window;
+          import android.view.WindowManager;
           import android.widget.Button;
           import android.widget.EditText;
           import android.widget.LinearLayout;
@@ -137,174 +152,300 @@ jobs:
           import java.util.Locale;
 
           public class MainActivity extends Activity implements SensorEventListener {
+              private static final int BG = Color.rgb(8, 12, 24);
+              private static final int CARD = Color.rgb(18, 26, 48);
+              private static final int CARD_2 = Color.rgb(13, 20, 39);
+              private static final int TEXT = Color.rgb(235, 243, 255);
+              private static final int MUTED = Color.rgb(144, 161, 188);
+              private static final int CYAN = Color.rgb(57, 220, 255);
+              private static final int GREEN = Color.rgb(51, 255, 152);
+              private static final int AMBER = Color.rgb(255, 193, 84);
+              private static final int RED = Color.rgb(255, 82, 108);
+
               private SensorManager sensorManager;
               private Sensor accelerometer;
-              private TextView title, pitchText, rollText, statusText, savedText;
+              private TextView pitchText, rollText, statusText, errorText, savedText, sensorText;
               private EditText nameInput, targetInput, toleranceInput;
-              private float[] gravity = new float[]{0f, 0f, 0f};
+              private BubbleView bubbleView;
+
+              private final float[] gravity = new float[]{0f, 0f, 0f};
               private double pitch = 0.0;
               private double roll = 0.0;
               private double zeroPitch = 0.0;
               private double zeroRoll = 0.0;
               private boolean hasValue = false;
               private long lastVibration = 0;
+              private long lastUiUpdate = 0;
+              private int eventCount = 0;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().setStatusBarColor(BG);
+                  getWindow().setNavigationBarColor(BG);
+
                   sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-                  accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+                  accelerometer = sensorManager == null ? null : sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
 
                   ScrollView scroll = new ScrollView(this);
+                  scroll.setFillViewport(true);
+                  scroll.setBackgroundColor(BG);
+
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(36, 36, 36, 36);
-                  root.setGravity(Gravity.CENTER_HORIZONTAL);
+                  root.setPadding(dp(18), dp(18), dp(18), dp(28));
                   scroll.addView(root);
 
-                  title = new TextView(this);
-                  title.setText("Nivel FV");
+                  TextView title = new TextView(this);
+                  title.setText("NIVEL FV");
+                  title.setTextColor(TEXT);
                   title.setTextSize(34);
-                  title.setTextColor(Color.BLACK);
+                  title.setTypeface(Typeface.DEFAULT_BOLD);
                   title.setGravity(Gravity.CENTER);
-                  root.addView(title, new LinearLayout.LayoutParams(-1, -2));
+                  title.setLetterSpacing(0.12f);
+                  root.addView(title, lp(-1, -2, 0, 0, 0, 2));
 
                   TextView subtitle = new TextView(this);
-                  subtitle.setText("Inclinómetro para paneles / trackers");
-                  subtitle.setTextSize(16);
+                  subtitle.setText("inclinómetro solar · DaKoNe tools");
+                  subtitle.setTextColor(CYAN);
+                  subtitle.setTextSize(14);
                   subtitle.setGravity(Gravity.CENTER);
-                  subtitle.setPadding(0, 0, 0, 26);
-                  root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
+                  root.addView(subtitle, lp(-1, -2, 0, 0, 0, 14));
 
-                  pitchText = bigText("Longitudinal: --°");
-                  rollText = bigText("Transversal: --°");
-                  statusText = bigText("Estado: esperando sensor");
-                  root.addView(pitchText);
-                  root.addView(rollText);
-                  root.addView(statusText);
+                  LinearLayout statusCard = card();
+                  statusText = new TextView(this);
+                  statusText.setText("ESPERANDO SENSOR");
+                  statusText.setTextSize(22);
+                  statusText.setGravity(Gravity.CENTER);
+                  statusText.setTypeface(Typeface.DEFAULT_BOLD);
+                  statusText.setTextColor(AMBER);
+                  statusCard.addView(statusText, lp(-1, -2, 0, 0, 0, 6));
 
-                  nameInput = input("CT / inversor / tracker / mesa");
-                  targetInput = input("Ángulo objetivo, ej. 0");
-                  toleranceInput = input("Tolerancia, ej. 0.5");
+                  errorText = new TextView(this);
+                  errorText.setText("desviación: --°");
+                  errorText.setTextSize(15);
+                  errorText.setTextColor(MUTED);
+                  errorText.setGravity(Gravity.CENTER);
+                  statusCard.addView(errorText);
+                  root.addView(statusCard, lp(-1, -2, 0, 0, 0, 12));
+
+                  bubbleView = new BubbleView(this);
+                  root.addView(bubbleView, lp(-1, dp(240), 0, 0, 0, 12));
+
+                  LinearLayout grid = new LinearLayout(this);
+                  grid.setOrientation(LinearLayout.HORIZONTAL);
+                  grid.setBaselineAligned(false);
+                  LinearLayout cardPitch = metricCard("LONGITUDINAL");
+                  pitchText = valueText("--°");
+                  cardPitch.addView(pitchText);
+                  LinearLayout cardRoll = metricCard("TRANSVERSAL");
+                  rollText = valueText("--°");
+                  cardRoll.addView(rollText);
+                  grid.addView(cardPitch, weightLp(1f, 0, 0, 6, 0));
+                  grid.addView(cardRoll, weightLp(1f, 6, 0, 0, 0));
+                  root.addView(grid, lp(-1, -2, 0, 0, 0, 12));
+
+                  LinearLayout form = card();
+                  nameInput = input("CT / INV / tracker / mesa", false);
+                  targetInput = input("Ángulo objetivo", true);
+                  toleranceInput = input("Tolerancia", true);
                   targetInput.setText("0");
                   toleranceInput.setText("0.5");
-                  root.addView(nameInput);
-                  root.addView(targetInput);
-                  root.addView(toleranceInput);
+                  form.addView(label("Referencia de medida"));
+                  form.addView(nameInput);
+                  form.addView(label("Objetivo y tolerancia en grados"));
+                  LinearLayout row = new LinearLayout(this);
+                  row.setOrientation(LinearLayout.HORIZONTAL);
+                  row.addView(targetInput, weightLp(1f, 0, 0, 6, 0));
+                  row.addView(toleranceInput, weightLp(1f, 6, 0, 0, 0));
+                  form.addView(row);
+                  root.addView(form, lp(-1, -2, 0, 0, 0, 12));
 
-                  Button calibrate = button("Calibrar cero");
-                  Button save = button("Guardar medida CSV");
-                  Button reset = button("Reset cero");
-                  root.addView(calibrate);
-                  root.addView(save);
-                  root.addView(reset);
+                  LinearLayout buttons1 = new LinearLayout(this);
+                  buttons1.setOrientation(LinearLayout.HORIZONTAL);
+                  Button calibrate = button("Calibrar cero", CYAN, Color.rgb(0, 28, 42));
+                  Button reset = button("Reset", MUTED, Color.rgb(29, 37, 58));
+                  buttons1.addView(calibrate, weightLp(1f, 0, 0, 6, 0));
+                  buttons1.addView(reset, weightLp(1f, 6, 0, 0, 0));
+                  root.addView(buttons1, lp(-1, -2, 0, 0, 0, 10));
 
-                  savedText = new TextView(this);
-                  savedText.setText("Sin mediciones guardadas todavía.");
-                  savedText.setTextSize(14);
-                  savedText.setPadding(0, 24, 0, 0);
-                  root.addView(savedText, new LinearLayout.LayoutParams(-1, -2));
+                  Button save = button("Guardar medida CSV", GREEN, Color.rgb(0, 45, 30));
+                  root.addView(save, lp(-1, -2, 0, 0, 0, 12));
+
+                  LinearLayout diag = card();
+                  sensorText = small("sensor: " + (accelerometer == null ? "NO DISPONIBLE" : accelerometer.getName()));
+                  savedText = small("sin mediciones guardadas todavía");
+                  diag.addView(sensorText);
+                  diag.addView(savedText);
+                  root.addView(diag);
 
                   calibrate.setOnClickListener(v -> {
+                      if (!hasValue) {
+                          toast("Todavía no hay lectura");
+                          return;
+                      }
                       zeroPitch = pitch;
                       zeroRoll = roll;
-                      Toast.makeText(this, "Cero calibrado", Toast.LENGTH_SHORT).show();
+                      toast("Cero calibrado");
                   });
 
                   reset.setOnClickListener(v -> {
                       zeroPitch = 0.0;
                       zeroRoll = 0.0;
-                      Toast.makeText(this, "Cero reiniciado", Toast.LENGTH_SHORT).show();
+                      toast("Cero reiniciado");
                   });
 
                   save.setOnClickListener(v -> saveMeasurement());
                   setContentView(scroll);
 
                   if (accelerometer == null) {
-                      statusText.setText("Estado: este móvil no tiene acelerómetro disponible");
-                      statusText.setTextColor(Color.RED);
+                      statusText.setText("SIN ACELERÓMETRO");
+                      statusText.setTextColor(RED);
+                      errorText.setText("este móvil no ofrece sensor compatible");
                   }
-              }
-
-              private TextView bigText(String text) {
-                  TextView tv = new TextView(this);
-                  tv.setText(text);
-                  tv.setTextSize(24);
-                  tv.setTextColor(Color.BLACK);
-                  tv.setPadding(0, 12, 0, 12);
-                  tv.setGravity(Gravity.CENTER);
-                  return tv;
-              }
-
-              private EditText input(String hint) {
-                  EditText e = new EditText(this);
-                  e.setHint(hint);
-                  e.setSingleLine(true);
-                  e.setTextSize(16);
-                  e.setPadding(8, 16, 8, 16);
-                  return e;
-              }
-
-              private Button button(String text) {
-                  Button b = new Button(this);
-                  b.setText(text);
-                  b.setTextSize(16);
-                  b.setAllCaps(false);
-                  return b;
               }
 
               @Override
               protected void onResume() {
                   super.onResume();
-                  if (accelerometer != null) {
-                      sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+                  try {
+                      if (sensorManager != null && accelerometer != null) {
+                          sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI);
+                      }
+                  } catch (Exception e) {
+                      showSensorError(e);
                   }
               }
 
               @Override
               protected void onPause() {
                   super.onPause();
-                  sensorManager.unregisterListener(this);
+                  try {
+                      if (sensorManager != null) sensorManager.unregisterListener(this);
+                  } catch (Exception ignored) {}
               }
 
               @Override
               public void onSensorChanged(SensorEvent event) {
-                  if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) return;
-                  final float alpha = 0.85f;
-                  gravity[0] = alpha * gravity[0] + (1 - alpha) * event.values[0];
-                  gravity[1] = alpha * gravity[1] + (1 - alpha) * event.values[1];
-                  gravity[2] = alpha * gravity[2] + (1 - alpha) * event.values[2];
+                  try {
+                      if (event == null || event.sensor == null || event.values == null) return;
+                      if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) return;
+                      if (event.values.length < 3) return;
 
-                  double x = gravity[0];
-                  double y = gravity[1];
-                  double z = gravity[2];
+                      final float alpha = 0.88f;
+                      gravity[0] = alpha * gravity[0] + (1f - alpha) * event.values[0];
+                      gravity[1] = alpha * gravity[1] + (1f - alpha) * event.values[1];
+                      gravity[2] = alpha * gravity[2] + (1f - alpha) * event.values[2];
 
-                  pitch = Math.toDegrees(Math.atan2(-x, Math.sqrt(y * y + z * z)));
-                  roll = Math.toDegrees(Math.atan2(y, z));
-                  hasValue = true;
-                  updateDisplay();
+                      double x = gravity[0];
+                      double y = gravity[1];
+                      double z = gravity[2];
+
+                      pitch = Math.toDegrees(Math.atan2(-x, Math.sqrt(y * y + z * z)));
+                      roll = Math.toDegrees(Math.atan2(y, z));
+                      hasValue = true;
+                      eventCount++;
+
+                      long now = System.currentTimeMillis();
+                      if (now - lastUiUpdate > 80) {
+                          lastUiUpdate = now;
+                          updateDisplay();
+                      }
+                  } catch (Exception e) {
+                      showSensorError(e);
+                  }
               }
 
               private void updateDisplay() {
-                  double relativePitch = pitch - zeroPitch;
-                  double relativeRoll = roll - zeroRoll;
-                  double target = parseDouble(targetInput.getText().toString(), 0.0);
-                  double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 0.5));
-                  double error = Math.max(Math.abs(relativePitch - target), Math.abs(relativeRoll));
+                  try {
+                      double relativePitch = pitch - zeroPitch;
+                      double relativeRoll = roll - zeroRoll;
+                      double target = parseDouble(targetInput.getText().toString(), 0.0);
+                      double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 0.5));
+                      if (tolerance < 0.05) tolerance = 0.05;
 
-                  pitchText.setText(String.format(Locale.US, "Longitudinal: %.2f°", relativePitch));
-                  rollText.setText(String.format(Locale.US, "Transversal: %.2f°", relativeRoll));
+                      double errorLong = Math.abs(relativePitch - target);
+                      double errorTrans = Math.abs(relativeRoll);
+                      double error = Math.max(errorLong, errorTrans);
 
-                  if (error <= tolerance) {
-                      statusText.setText("Estado: OK");
-                      statusText.setTextColor(Color.rgb(0, 120, 0));
-                      vibrateOnce();
-                  } else if (error <= tolerance * 2.0) {
-                      statusText.setText("Estado: REVISAR");
-                      statusText.setTextColor(Color.rgb(190, 120, 0));
-                  } else {
-                      statusText.setText("Estado: FUERA");
-                      statusText.setTextColor(Color.RED);
+                      pitchText.setText(String.format(Locale.US, "%+.2f°", relativePitch));
+                      rollText.setText(String.format(Locale.US, "%+.2f°", relativeRoll));
+                      errorText.setText(String.format(Locale.US, "desviación máxima: %.2f° · lecturas: %d", error, eventCount));
+                      sensorText.setText("sensor: " + (accelerometer == null ? "NO" : accelerometer.getName()) + " · cero " + fmt(zeroPitch) + " / " + fmt(zeroRoll));
+                      bubbleView.setValues(relativePitch - target, relativeRoll, tolerance);
+
+                      if (error <= tolerance) {
+                          statusText.setText("OK · CLAVADO");
+                          statusText.setTextColor(GREEN);
+                          safeVibrate();
+                      } else if (error <= tolerance * 2.0) {
+                          statusText.setText("REVISAR");
+                          statusText.setTextColor(AMBER);
+                      } else {
+                          statusText.setText("FUERA");
+                          statusText.setTextColor(RED);
+                      }
+                  } catch (Exception e) {
+                      showSensorError(e);
+                  }
+              }
+
+              private void saveMeasurement() {
+                  if (!hasValue) {
+                      toast("Todavía no hay lectura de sensor");
+                      return;
+                  }
+                  try {
+                      String name = nameInput.getText().toString().trim();
+                      if (name.isEmpty()) name = "sin_nombre";
+                      double relativePitch = pitch - zeroPitch;
+                      double relativeRoll = roll - zeroRoll;
+                      double target = parseDouble(targetInput.getText().toString(), 0.0);
+                      double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 0.5));
+                      String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+
+                      File dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+                      if (dir == null) dir = getFilesDir();
+                      File file = new File(dir, "nivel_fv_mediciones.csv");
+                      boolean newFile = !file.exists();
+                      FileWriter writer = new FileWriter(file, true);
+                      if (newFile) {
+                          writer.append("fecha,nombre,longitudinal_deg,transversal_deg,objetivo_deg,tolerancia_deg,zero_longitudinal,zero_transversal\n");
+                      }
+                      writer.append(csv(date)).append(',')
+                              .append(csv(name)).append(',')
+                              .append(String.format(Locale.US, "%.3f", relativePitch)).append(',')
+                              .append(String.format(Locale.US, "%.3f", relativeRoll)).append(',')
+                              .append(String.format(Locale.US, "%.3f", target)).append(',')
+                              .append(String.format(Locale.US, "%.3f", tolerance)).append(',')
+                              .append(String.format(Locale.US, "%.3f", zeroPitch)).append(',')
+                              .append(String.format(Locale.US, "%.3f", zeroRoll)).append('\n');
+                      writer.close();
+                      savedText.setText("CSV: " + file.getAbsolutePath());
+                      toast("Medida guardada");
+                  } catch (Exception e) {
+                      savedText.setText("Error guardando: " + e.getClass().getSimpleName());
+                      Toast.makeText(this, "Error guardando: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              private void safeVibrate() {
+                  long now = System.currentTimeMillis();
+                  if (now - lastVibration < 2500) return;
+                  lastVibration = now;
+                  try {
+                      Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+                      if (vibrator != null && vibrator.hasVibrator()) {
+                          if (android.os.Build.VERSION.SDK_INT >= 26) {
+                              vibrator.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE));
+                          } else {
+                              vibrator.vibrate(35);
+                          }
+                      }
+                  } catch (Throwable ignored) {
+                      // La medición no debe morir jamás por una vibración. Primero medir, luego adornos.
                   }
               }
 
@@ -316,60 +457,205 @@ jobs:
                   }
               }
 
-              private void vibrateOnce() {
-                  long now = System.currentTimeMillis();
-                  if (now - lastVibration < 1500) return;
-                  lastVibration = now;
-                  Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-                  if (vibrator != null && vibrator.hasVibrator()) {
-                      if (android.os.Build.VERSION.SDK_INT >= 26) {
-                          vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE));
-                      } else {
-                          vibrator.vibrate(40);
-                      }
-                  }
+              private String fmt(double v) {
+                  return String.format(Locale.US, "%+.2f°", v);
               }
 
-              private void saveMeasurement() {
-                  if (!hasValue) {
-                      Toast.makeText(this, "Todavía no hay lectura de sensor", Toast.LENGTH_SHORT).show();
-                      return;
-                  }
-                  try {
-                      String name = nameInput.getText().toString().trim();
-                      if (name.isEmpty()) name = "sin_nombre";
-                      double relativePitch = pitch - zeroPitch;
-                      double relativeRoll = roll - zeroRoll;
-                      String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
-
-                      File dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
-                      if (dir == null) dir = getFilesDir();
-                      File file = new File(dir, "nivel_fv_mediciones.csv");
-                      boolean newFile = !file.exists();
-                      FileWriter writer = new FileWriter(file, true);
-                      if (newFile) {
-                          writer.append("fecha,nombre,longitudinal_deg,transversal_deg,objetivo_deg,tolerancia_deg\n");
-                      }
-                      writer.append(escape(date)).append(',')
-                              .append(escape(name)).append(',')
-                              .append(String.format(Locale.US, "%.3f", relativePitch)).append(',')
-                              .append(String.format(Locale.US, "%.3f", relativeRoll)).append(',')
-                              .append(escape(targetInput.getText().toString())).append(',')
-                              .append(escape(toleranceInput.getText().toString())).append('\n');
-                      writer.close();
-                      savedText.setText("Guardado en: " + file.getAbsolutePath());
-                      Toast.makeText(this, "Medida guardada", Toast.LENGTH_SHORT).show();
-                  } catch (Exception e) {
-                      Toast.makeText(this, "Error guardando: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              private String escape(String value) {
+              private String csv(String value) {
                   return "\"" + value.replace("\"", "\"\"") + "\"";
+              }
+
+              private void showSensorError(Exception e) {
+                  if (statusText != null) {
+                      statusText.setText("ERROR SENSOR");
+                      statusText.setTextColor(RED);
+                  }
+                  if (errorText != null) errorText.setText(e.getClass().getSimpleName() + ": " + e.getMessage());
+              }
+
+              private void toast(String text) {
+                  Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
               }
 
               @Override
               public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+
+              private LinearLayout card() {
+                  LinearLayout l = new LinearLayout(this);
+                  l.setOrientation(LinearLayout.VERTICAL);
+                  l.setPadding(dp(16), dp(16), dp(16), dp(16));
+                  GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{CARD, CARD_2});
+                  bg.setCornerRadius(dp(22));
+                  bg.setStroke(dp(1), Color.argb(95, 57, 220, 255));
+                  l.setBackground(bg);
+                  return l;
+              }
+
+              private LinearLayout metricCard(String text) {
+                  LinearLayout l = card();
+                  l.setGravity(Gravity.CENTER);
+                  TextView label = new TextView(this);
+                  label.setText(text);
+                  label.setTextColor(MUTED);
+                  label.setTextSize(11);
+                  label.setGravity(Gravity.CENTER);
+                  label.setTypeface(Typeface.DEFAULT_BOLD);
+                  label.setLetterSpacing(0.08f);
+                  l.addView(label, lp(-1, -2, 0, 0, 0, 4));
+                  return l;
+              }
+
+              private TextView valueText(String text) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextColor(TEXT);
+                  tv.setTextSize(30);
+                  tv.setGravity(Gravity.CENTER);
+                  tv.setTypeface(Typeface.DEFAULT_BOLD);
+                  return tv;
+              }
+
+              private TextView label(String text) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextColor(MUTED);
+                  tv.setTextSize(12);
+                  tv.setPadding(0, dp(8), 0, dp(4));
+                  return tv;
+              }
+
+              private TextView small(String text) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextColor(MUTED);
+                  tv.setTextSize(12);
+                  tv.setPadding(0, dp(4), 0, dp(4));
+                  return tv;
+              }
+
+              private EditText input(String hint, boolean number) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setHintTextColor(Color.rgb(95, 112, 140));
+                  e.setTextColor(TEXT);
+                  e.setTextSize(16);
+                  e.setSingleLine(true);
+                  e.setPadding(dp(12), dp(8), dp(12), dp(8));
+                  e.setBackground(inputBg());
+                  if (number) e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+                  return e;
+              }
+
+              private GradientDrawable inputBg() {
+                  GradientDrawable gd = new GradientDrawable();
+                  gd.setColor(Color.rgb(7, 13, 28));
+                  gd.setCornerRadius(dp(14));
+                  gd.setStroke(dp(1), Color.argb(70, 57, 220, 255));
+                  return gd;
+              }
+
+              private Button button(String text, int stroke, int fill) {
+                  Button b = new Button(this);
+                  b.setText(text);
+                  b.setTextColor(TEXT);
+                  b.setTextSize(15);
+                  b.setAllCaps(false);
+                  b.setTypeface(Typeface.DEFAULT_BOLD);
+                  GradientDrawable bg = new GradientDrawable();
+                  bg.setColor(fill);
+                  bg.setCornerRadius(dp(16));
+                  bg.setStroke(dp(1), stroke);
+                  b.setBackground(bg);
+                  b.setPadding(dp(8), dp(8), dp(8), dp(8));
+                  return b;
+              }
+
+              private LinearLayout.LayoutParams lp(int w, int h, int l, int t, int r, int b) {
+                  LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(w, h);
+                  p.setMargins(dp(l), dp(t), dp(r), dp(b));
+                  return p;
+              }
+
+              private LinearLayout.LayoutParams weightLp(float weight, int l, int t, int r, int b) {
+                  LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight);
+                  p.setMargins(dp(l), dp(t), dp(r), dp(b));
+                  return p;
+              }
+
+              private int dp(int v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              public static class BubbleView extends View {
+                  private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  private double pitchError = 0;
+                  private double rollError = 0;
+                  private double tolerance = 0.5;
+
+                  public BubbleView(Context context) {
+                      super(context);
+                      setBackground(makeBg(context));
+                  }
+
+                  private static GradientDrawable makeBg(Context context) {
+                      GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                              new int[]{Color.rgb(12, 21, 43), Color.rgb(5, 10, 22)});
+                      bg.setCornerRadius((int) (24 * context.getResources().getDisplayMetrics().density));
+                      bg.setStroke((int) (1 * context.getResources().getDisplayMetrics().density), Color.argb(100, 57, 220, 255));
+                      return bg;
+                  }
+
+                  public void setValues(double pitchError, double rollError, double tolerance) {
+                      this.pitchError = pitchError;
+                      this.rollError = rollError;
+                      this.tolerance = Math.max(0.05, tolerance);
+                      invalidate();
+                  }
+
+                  @Override
+                  protected void onDraw(Canvas canvas) {
+                      super.onDraw(canvas);
+                      int w = getWidth();
+                      int h = getHeight();
+                      float cx = w / 2f;
+                      float cy = h / 2f;
+                      float radius = Math.min(w, h) * 0.36f;
+
+                      paint.setStyle(Paint.Style.STROKE);
+                      paint.setStrokeWidth(2f);
+                      paint.setColor(Color.argb(70, 57, 220, 255));
+                      canvas.drawCircle(cx, cy, radius, paint);
+                      canvas.drawCircle(cx, cy, radius * 0.55f, paint);
+                      canvas.drawLine(cx - radius, cy, cx + radius, cy, paint);
+                      canvas.drawLine(cx, cy - radius, cx, cy + radius, paint);
+
+                      paint.setStyle(Paint.Style.FILL);
+                      paint.setColor(Color.argb(18, 57, 220, 255));
+                      canvas.drawOval(new RectF(cx - radius, cy - radius, cx + radius, cy + radius), paint);
+
+                      float scale = radius / (float) Math.max(1.0, tolerance * 3.0);
+                      float bx = clamp(cx + (float) rollError * scale, cx - radius, cx + radius);
+                      float by = clamp(cy + (float) pitchError * scale, cy - radius, cy + radius);
+                      double error = Math.max(Math.abs(pitchError), Math.abs(rollError));
+                      int color = error <= tolerance ? Color.rgb(51, 255, 152) : (error <= tolerance * 2.0 ? Color.rgb(255, 193, 84) : Color.rgb(255, 82, 108));
+
+                      paint.setStyle(Paint.Style.FILL);
+                      paint.setColor(Color.argb(65, Color.red(color), Color.green(color), Color.blue(color)));
+                      canvas.drawCircle(bx, by, radius * 0.18f, paint);
+                      paint.setColor(color);
+                      canvas.drawCircle(bx, by, radius * 0.11f, paint);
+
+                      paint.setTextAlign(Paint.Align.CENTER);
+                      paint.setTypeface(Typeface.DEFAULT_BOLD);
+                      paint.setTextSize(34f);
+                      paint.setColor(Color.rgb(235, 243, 255));
+                      canvas.drawText(String.format(Locale.US, "%+.2f°", error), cx, h - 28f, paint);
+                  }
+
+                  private float clamp(float v, float min, float max) {
+                      return Math.max(min, Math.min(max, v));
+                  }
+              }
           }
           JAVA
 
@@ -379,5 +665,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NivelFV-debug-apk
+          name: NivelFV-v2-neon-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
