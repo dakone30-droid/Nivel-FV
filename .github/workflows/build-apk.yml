@@ -1,4 +1,4 @@
-name: Build NivelFV APK v5 Icono
+name: Build NivelFV APK v6 DaKoNe
 
 on:
   workflow_dispatch:
@@ -1581,7 +1581,7 @@ jobs:
 
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(dp(18), dp(18), dp(18), dp(28));
+                  root.setPadding(dp(18), dp(58), dp(18), dp(28));
                   scroll.addView(root);
 
                   TextView title = new TextView(this);
@@ -1598,7 +1598,15 @@ jobs:
                   subtitle.setTextColor(CYAN);
                   subtitle.setTextSize(14);
                   subtitle.setGravity(Gravity.CENTER);
-                  root.addView(subtitle, lp(-1, -2, 0, 0, 0, 14));
+                  root.addView(subtitle, lp(-1, -2, 0, 0, 0, 6));
+
+                  TextView byDakone = new TextView(this);
+                  byDakone.setText("Realizado por DaKoNe");
+                  byDakone.setTextColor(Color.rgb(180, 240, 255));
+                  byDakone.setTextSize(13);
+                  byDakone.setGravity(Gravity.CENTER);
+                  byDakone.setTypeface(Typeface.DEFAULT_BOLD);
+                  root.addView(byDakone, lp(-1, -2, 0, 0, 0, 14));
 
                   LinearLayout statusCard = card();
                   statusText = new TextView(this);
@@ -1638,7 +1646,7 @@ jobs:
                   targetInput = input("Ángulo objetivo", true);
                   toleranceInput = input("Tolerancia", true);
                   targetInput.setText("0");
-                  toleranceInput.setText("0.5");
+                  toleranceInput.setText("1");
                   form.addView(label("Referencia de medida"));
                   form.addView(nameInput);
                   form.addView(label("Objetivo y tolerancia en grados"));
@@ -1749,7 +1757,7 @@ jobs:
                       double relativePitch = pitch - zeroPitch;
                       double relativeRoll = roll - zeroRoll;
                       double target = parseDouble(targetInput.getText().toString(), 0.0);
-                      double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 0.5));
+                      double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 1.0));
                       if (tolerance < 0.05) tolerance = 0.05;
 
                       double errorLong = Math.abs(relativePitch - target);
@@ -1789,7 +1797,7 @@ jobs:
                       double relativePitch = pitch - zeroPitch;
                       double relativeRoll = roll - zeroRoll;
                       double target = parseDouble(targetInput.getText().toString(), 0.0);
-                      double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 0.5));
+                      double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 1.0));
                       String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
 
                       File dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
@@ -1976,7 +1984,7 @@ jobs:
                   private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
                   private double pitchError = 0;
                   private double rollError = 0;
-                  private double tolerance = 0.5;
+                  private double tolerance = 1.0;
                   private double displayPitchError = 0.0;
                   private double displayRollError = 0.0;
 
@@ -2066,5 +2074,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NivelFV-v5-ejes-icono-debug-apk
+          name: NivelFV-v6-dakone-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
