@@ -1,0 +1,383 @@
+name: Build NivelFV APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/dakone/nivelfv
+          cat > settings.gradle <<'GRADLE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = 'NivelFV'
+          include ':app'
+          GRADLE
+
+          cat > build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application' version '8.6.1' apply false
+          }
+          GRADLE
+
+          cat > app/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.dakone.nivelfv'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.dakone.nivelfv'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          GRADLE
+
+          cat > app/src/main/AndroidManifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="Nivel FV"
+                  android:allowBackup="false"
+                  android:supportsRtl="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          XML
+
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/styles.xml <<'XML'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowLightStatusBar">true</item>
+                  <item name="android:colorAccent">#111111</item>
+              </style>
+          </resources>
+          XML
+
+          cat > app/src/main/java/com/dakone/nivelfv/MainActivity.java <<'JAVA'
+          package com.dakone.nivelfv;
+
+          import android.app.Activity;
+          import android.hardware.Sensor;
+          import android.hardware.SensorEvent;
+          import android.hardware.SensorEventListener;
+          import android.hardware.SensorManager;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.os.VibrationEffect;
+          import android.os.Vibrator;
+          import android.content.Context;
+          import android.graphics.Color;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.io.File;
+          import java.io.FileWriter;
+          import java.text.SimpleDateFormat;
+          import java.util.Date;
+          import java.util.Locale;
+
+          public class MainActivity extends Activity implements SensorEventListener {
+              private SensorManager sensorManager;
+              private Sensor accelerometer;
+              private TextView title, pitchText, rollText, statusText, savedText;
+              private EditText nameInput, targetInput, toleranceInput;
+              private float[] gravity = new float[]{0f, 0f, 0f};
+              private double pitch = 0.0;
+              private double roll = 0.0;
+              private double zeroPitch = 0.0;
+              private double zeroRoll = 0.0;
+              private boolean hasValue = false;
+              private long lastVibration = 0;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+                  accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+
+                  ScrollView scroll = new ScrollView(this);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(36, 36, 36, 36);
+                  root.setGravity(Gravity.CENTER_HORIZONTAL);
+                  scroll.addView(root);
+
+                  title = new TextView(this);
+                  title.setText("Nivel FV");
+                  title.setTextSize(34);
+                  title.setTextColor(Color.BLACK);
+                  title.setGravity(Gravity.CENTER);
+                  root.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+                  TextView subtitle = new TextView(this);
+                  subtitle.setText("Inclinómetro para paneles / trackers");
+                  subtitle.setTextSize(16);
+                  subtitle.setGravity(Gravity.CENTER);
+                  subtitle.setPadding(0, 0, 0, 26);
+                  root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
+
+                  pitchText = bigText("Longitudinal: --°");
+                  rollText = bigText("Transversal: --°");
+                  statusText = bigText("Estado: esperando sensor");
+                  root.addView(pitchText);
+                  root.addView(rollText);
+                  root.addView(statusText);
+
+                  nameInput = input("CT / inversor / tracker / mesa");
+                  targetInput = input("Ángulo objetivo, ej. 0");
+                  toleranceInput = input("Tolerancia, ej. 0.5");
+                  targetInput.setText("0");
+                  toleranceInput.setText("0.5");
+                  root.addView(nameInput);
+                  root.addView(targetInput);
+                  root.addView(toleranceInput);
+
+                  Button calibrate = button("Calibrar cero");
+                  Button save = button("Guardar medida CSV");
+                  Button reset = button("Reset cero");
+                  root.addView(calibrate);
+                  root.addView(save);
+                  root.addView(reset);
+
+                  savedText = new TextView(this);
+                  savedText.setText("Sin mediciones guardadas todavía.");
+                  savedText.setTextSize(14);
+                  savedText.setPadding(0, 24, 0, 0);
+                  root.addView(savedText, new LinearLayout.LayoutParams(-1, -2));
+
+                  calibrate.setOnClickListener(v -> {
+                      zeroPitch = pitch;
+                      zeroRoll = roll;
+                      Toast.makeText(this, "Cero calibrado", Toast.LENGTH_SHORT).show();
+                  });
+
+                  reset.setOnClickListener(v -> {
+                      zeroPitch = 0.0;
+                      zeroRoll = 0.0;
+                      Toast.makeText(this, "Cero reiniciado", Toast.LENGTH_SHORT).show();
+                  });
+
+                  save.setOnClickListener(v -> saveMeasurement());
+                  setContentView(scroll);
+
+                  if (accelerometer == null) {
+                      statusText.setText("Estado: este móvil no tiene acelerómetro disponible");
+                      statusText.setTextColor(Color.RED);
+                  }
+              }
+
+              private TextView bigText(String text) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextSize(24);
+                  tv.setTextColor(Color.BLACK);
+                  tv.setPadding(0, 12, 0, 12);
+                  tv.setGravity(Gravity.CENTER);
+                  return tv;
+              }
+
+              private EditText input(String hint) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setSingleLine(true);
+                  e.setTextSize(16);
+                  e.setPadding(8, 16, 8, 16);
+                  return e;
+              }
+
+              private Button button(String text) {
+                  Button b = new Button(this);
+                  b.setText(text);
+                  b.setTextSize(16);
+                  b.setAllCaps(false);
+                  return b;
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (accelerometer != null) {
+                      sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+                  }
+              }
+
+              @Override
+              protected void onPause() {
+                  super.onPause();
+                  sensorManager.unregisterListener(this);
+              }
+
+              @Override
+              public void onSensorChanged(SensorEvent event) {
+                  if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) return;
+                  final float alpha = 0.85f;
+                  gravity[0] = alpha * gravity[0] + (1 - alpha) * event.values[0];
+                  gravity[1] = alpha * gravity[1] + (1 - alpha) * event.values[1];
+                  gravity[2] = alpha * gravity[2] + (1 - alpha) * event.values[2];
+
+                  double x = gravity[0];
+                  double y = gravity[1];
+                  double z = gravity[2];
+
+                  pitch = Math.toDegrees(Math.atan2(-x, Math.sqrt(y * y + z * z)));
+                  roll = Math.toDegrees(Math.atan2(y, z));
+                  hasValue = true;
+                  updateDisplay();
+              }
+
+              private void updateDisplay() {
+                  double relativePitch = pitch - zeroPitch;
+                  double relativeRoll = roll - zeroRoll;
+                  double target = parseDouble(targetInput.getText().toString(), 0.0);
+                  double tolerance = Math.abs(parseDouble(toleranceInput.getText().toString(), 0.5));
+                  double error = Math.max(Math.abs(relativePitch - target), Math.abs(relativeRoll));
+
+                  pitchText.setText(String.format(Locale.US, "Longitudinal: %.2f°", relativePitch));
+                  rollText.setText(String.format(Locale.US, "Transversal: %.2f°", relativeRoll));
+
+                  if (error <= tolerance) {
+                      statusText.setText("Estado: OK");
+                      statusText.setTextColor(Color.rgb(0, 120, 0));
+                      vibrateOnce();
+                  } else if (error <= tolerance * 2.0) {
+                      statusText.setText("Estado: REVISAR");
+                      statusText.setTextColor(Color.rgb(190, 120, 0));
+                  } else {
+                      statusText.setText("Estado: FUERA");
+                      statusText.setTextColor(Color.RED);
+                  }
+              }
+
+              private double parseDouble(String value, double fallback) {
+                  try {
+                      return Double.parseDouble(value.replace(',', '.').trim());
+                  } catch (Exception e) {
+                      return fallback;
+                  }
+              }
+
+              private void vibrateOnce() {
+                  long now = System.currentTimeMillis();
+                  if (now - lastVibration < 1500) return;
+                  lastVibration = now;
+                  Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+                  if (vibrator != null && vibrator.hasVibrator()) {
+                      if (android.os.Build.VERSION.SDK_INT >= 26) {
+                          vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE));
+                      } else {
+                          vibrator.vibrate(40);
+                      }
+                  }
+              }
+
+              private void saveMeasurement() {
+                  if (!hasValue) {
+                      Toast.makeText(this, "Todavía no hay lectura de sensor", Toast.LENGTH_SHORT).show();
+                      return;
+                  }
+                  try {
+                      String name = nameInput.getText().toString().trim();
+                      if (name.isEmpty()) name = "sin_nombre";
+                      double relativePitch = pitch - zeroPitch;
+                      double relativeRoll = roll - zeroRoll;
+                      String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+
+                      File dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+                      if (dir == null) dir = getFilesDir();
+                      File file = new File(dir, "nivel_fv_mediciones.csv");
+                      boolean newFile = !file.exists();
+                      FileWriter writer = new FileWriter(file, true);
+                      if (newFile) {
+                          writer.append("fecha,nombre,longitudinal_deg,transversal_deg,objetivo_deg,tolerancia_deg\n");
+                      }
+                      writer.append(escape(date)).append(',')
+                              .append(escape(name)).append(',')
+                              .append(String.format(Locale.US, "%.3f", relativePitch)).append(',')
+                              .append(String.format(Locale.US, "%.3f", relativeRoll)).append(',')
+                              .append(escape(targetInput.getText().toString())).append(',')
+                              .append(escape(toleranceInput.getText().toString())).append('\n');
+                      writer.close();
+                      savedText.setText("Guardado en: " + file.getAbsolutePath());
+                      Toast.makeText(this, "Medida guardada", Toast.LENGTH_SHORT).show();
+                  } catch (Exception e) {
+                      Toast.makeText(this, "Error guardando: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              private String escape(String value) {
+                  return "\"" + value.replace("\"", "\"\"") + "\"";
+              }
+
+              @Override
+              public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+          }
+          JAVA
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NivelFV-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
